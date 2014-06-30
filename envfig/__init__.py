@@ -27,7 +27,7 @@ class Property(object):
             return self.type
 
         # Value property
-        key = '.'.join([path, self.name])
+        key = '.'.join([x for x in [path, self.name] if x])
 
         if key not in os.environ:
             return self.default
@@ -64,9 +64,8 @@ class ModelMeta(type):
 
         cls.__initialized = False
 
-        # Setup
-        if not hasattr(cls, '__name'):
-            cls.__name = cls.__name__.lower()
+        if '__key__' not in cls.__dict__:
+            cls.__key__ = cls.__name__.lower()
 
         cls.__properties = cls.__find_properties()
         cls.__initialized = True
@@ -91,14 +90,14 @@ class ModelMeta(type):
         return result
 
     def __path(cls):
-        if cls.parent:
-            return '%s.%s' % (cls.parent.__path(), cls.__name)
+        if cls.parent and cls.parent.__path():
+            return '%s.%s' % (cls.parent.__path(), cls.__key__)
 
-        return cls.__name
+        return cls.__key__
 
     def __getattr__(cls, name):
         if not cls.__initialized:
-            return getattr(cls, name)
+            return super(ModelMeta, cls).__getattribute__(name)
 
         prop = cls.__properties.get(name)
 
