@@ -1,15 +1,18 @@
 import inspect
 import logging
 import os
+import types
 
 log = logging.getLogger(__name__)
 
 
 class Property(object):
-    def __init__(self, type=str, name=None, default=None):
+    def __init__(self, type=str, name=None, default=None, required=False):
         self._type = type
         self.name = name
+
         self.default = default
+        self.required = required
 
     @property
     def type(self):
@@ -21,13 +24,25 @@ class Property(object):
 
         return self._type
 
-    def parse(self, path):
-        # Model property
+    def key(self, path):
+        return '.'.join([x for x in [path, self.name] if x])
+
+    def get(self, path, defaults=True):
         if issubclass(self.type, Model):
             return self.type
 
-        # Value property
-        key = '.'.join([x for x in [path, self.name] if x])
+        key = self.key(path)
+
+        if defaults and key not in os.environ:
+            return self.default
+
+        return os.environ.get(key)
+
+    def parse(self, path):
+        if issubclass(self.type, Model):
+            return self.type
+
+        key = self.key(path)
 
         if key not in os.environ:
             return self.default
@@ -67,7 +82,7 @@ class ModelMeta(type):
         if '__key__' not in cls.__dict__:
             cls.__key__ = cls.__name__.lower()
 
-        cls.__properties = cls.__find_properties()
+        cls._properties = cls.__find_properties()
         cls.__initialized = True
 
     def __find_properties(cls):
@@ -89,9 +104,9 @@ class ModelMeta(type):
 
         return result
 
-    def __path(cls):
-        if cls.parent and cls.parent.__path():
-            return '%s.%s' % (cls.parent.__path(), cls.__key__)
+    def _path(cls):
+        if cls.parent and cls.parent._path():
+            return '%s.%s' % (cls.parent._path(), cls.__key__)
 
         return cls.__key__
 
@@ -99,13 +114,29 @@ class ModelMeta(type):
         if not cls.__initialized:
             return super(ModelMeta, cls).__getattribute__(name)
 
-        prop = cls.__properties.get(name)
+        prop = cls._properties.get(name)
 
         if prop is None:
             return None
 
-        return prop.parse(cls.__path())
+        return prop.parse(cls._path())
 
 
 class Model(object):
     __metaclass__ = ModelMeta
+
+    @classmethod
+    def validate(cls):
+        path = cls._path()
+
+        for prop in cls._properties.values():
+            value = prop.get(path, defaults=False)
+
+            if inspect.isclass(value) and issubclass(value, Model):
+                value.validate()
+                continue
+
+            if prop.required and value is None:
+                raise ValueError('Configuration property "%s" is required' % prop.key(path))
+
+        return True
